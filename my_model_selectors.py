@@ -77,7 +77,27 @@ class SelectorBIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on BIC scores
-        raise NotImplementedError
+        best_score = float('Inf')
+        best_n = self.n_constant
+
+        num_data = sum(self.lengths)
+        num_features = len(self.X[0])
+
+        for n in range(self.min_n_components, self.max_n_components):
+            num_parameters = n*(n-1) + n + n*num_features
+            hmm_model = self.base_model(n)
+            try:
+                if hmm_model:
+                    logL = hmm_model.score(self.X, self.lengths)
+                    BIC = -2*logL+num_parameters*math.log(num_data)
+            except:
+                BIC = float('Inf')
+
+            if BIC < best_score:
+                best_score = BIC
+                best_n = n
+
+        return self.base_model(best_n)
 
 
 class SelectorDIC(ModelSelector):
@@ -94,7 +114,38 @@ class SelectorDIC(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection based on DIC scores
-        raise NotImplementedError
+        best_score = float('-Inf')
+        best_n = self.n_constant
+
+        for n in range(self.min_n_components, self.max_n_components):
+            hmm_model = self.base_model(n)
+            
+            if hmm_model:
+                try: 
+                    logL = hmm_model.score(self.X, self.lengths)
+                except:
+                    logL = float('-Inf')
+
+                logL_y = []
+                for key in self.hwords.keys():
+                    if key != self.this_word:
+                        X, sequences = self.hwords[key]
+                        try:
+                            logL_y.append(hmm_model.score(X, sequences))
+                        except:
+                            continue
+            else:
+                logL = float('-Inf')
+            if len(logL_y) > 0:
+                score = logL - np.mean(logL_y)
+            else:
+                score = logL
+            if score > best_score:
+                best_score = score
+                best_n = n
+
+        return self.base_model(best_n)
+
 
 
 class SelectorCV(ModelSelector):
@@ -106,4 +157,42 @@ class SelectorCV(ModelSelector):
         warnings.filterwarnings("ignore", category=DeprecationWarning)
 
         # TODO implement model selection using CV
-        raise NotImplementedError
+        best_score = -float('Inf')
+        best_n = self.n_constant
+        n_split = 3
+        split_method = KFold(n_splits = n_split)
+
+        for n in range(self.min_n_components, self.max_n_components):
+            score = 0
+            if len(self.sequences) <= n_split:
+                hmm_model = self.base_model(n)
+                try:
+                    if hmm_model:
+                        score = hmm_model.score(self.X, self.lengths)
+                except:
+                    score = -float('Inf')
+            else:
+                cv_score = []
+                for cv_train_idx, cv_test_idx in split_method.split(self.sequences):
+                    train_X, train_seqs = combine_sequences(cv_train_idx, self.sequences)
+                    test_X, test_seqs = combine_sequences(cv_test_idx, self.sequences)
+                    try:
+                        hmm_model = GaussianHMM(n_components=n, covariance_type="diag", n_iter=1000,
+                                            random_state=self.random_state, verbose=False).fit(train_X, train_seqs)
+                    except:
+                        hmm_model = None
+                    try:
+                        if hmm_model:
+                            cv_score.append(hmm_model.score(test_X, test_seqs))
+                    except:
+                        continue
+
+                score = np.mean(cv_score)
+
+            
+
+            if score > best_score:
+                best_score = score
+                best_n = n
+        return self.base_model(best_n)
+                
